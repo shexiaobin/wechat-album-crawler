@@ -30,7 +30,9 @@ from wechat_article_reader import article_to_markdown, detect_block_page, fetch_
 
 def norm(link: str) -> tuple[str, object]:
     """Canonical https link plus a dedup key: (mid, idx) when present, else the link."""
-    link = html.unescape(link).replace("\\x26", "&").replace("http://", "https://", 1).split("#")[0]
+    while html.unescape(link) != link:  # links in page JS can be escaped more than once (&amp;amp;)
+        link = html.unescape(link)
+    link = link.replace("\\x26", "&").replace("http://", "https://", 1).split("#")[0]
     m = re.search(r"mid=(\d+).*?idx=(\d+)", link)
     return link, (m.groups() if m else link)
 
