@@ -108,7 +108,10 @@ def main() -> int:
             continue
         meta = arts.setdefault(key, {"title": None, "link": norm(url)[0], "create_time": None, "album": []})
         if not args.no_body:
-            save_body(page, url, meta, args.out)
+            try:
+                save_body(page, url, meta, args.out)
+            except SystemExit as e:  # image/video posts and deleted articles have no js_content
+                print("NOBODY", url, str(e)[:60], flush=True)
         for aid in set(re.findall(r"album_id=(\d+)", page)) - set(albums):
             title, items = album_articles(biz, aid)
             albums[aid] = {"title": title, "count": len(items)}
