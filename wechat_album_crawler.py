@@ -83,7 +83,7 @@ def main() -> int:
 
     arts: dict = {}
     queue = [args.url]
-    visited, albums = set(), {}
+    visited, albums, blocks = set(), {}, {}
     while queue:
         url = queue.pop(0)
         key = norm(url)[1]
@@ -97,6 +97,10 @@ def main() -> int:
             continue
         block = detect_block_page(page)
         if block:
+            blocks[key] = blocks.get(key, 0) + 1
+            if blocks[key] >= 3:  # one stubborn article must not stall the whole queue
+                print("SKIP after 3 blocks:", url, flush=True)
+                continue
             print("BLOCKED:", block, "- waiting 10 min", flush=True)
             visited.discard(key)
             queue.insert(0, url)
