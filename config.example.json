@@ -1,0 +1,18 @@
+{
+ "weread_cookies": "weread_cookies.json",
+ "weread_max_pages": 3,
+ "accounts": [
+  {
+   "name": "some-account",
+   "dir": "output/some-account",
+   "biz": "MzA5OTcyNzM1MQ==",
+   "albums": ["1505408485298126848", "1505409333856157698"]
+  },
+  {
+   "name": "account-without-albums",
+   "dir": "output/account-without-albums",
+   "biz": "MjM5NzI0NTY3Mg==",
+   "albums": []
+  }
+ ]
+}

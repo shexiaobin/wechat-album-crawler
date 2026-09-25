@@ -1,2 +1,5 @@
 output/
 __pycache__/
+weread_cookies.json
+weread_qr.png
+config.json
