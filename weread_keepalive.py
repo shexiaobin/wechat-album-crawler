@@ -3,14 +3,15 @@
 
 WeChat Reading's web tokens are short-lived: wr_skey lasts about a day and wr_rt stops working
 after a day or two without use, so a session that is only touched once a week is dead by then.
-A real browser survives because the page renews on every visit. This script does the same with
-a persistent Chrome profile: open weread.qq.com, let the page renew, check that the article-list
-API answers, and write the cookies to the JSON file that weread_mp.py / wechat_incremental.py read.
+A real browser survives because the page renews on every visit. This script does the same:
+load the saved cookies into a headless Chrome, open weread.qq.com, let the page renew, check
+that the article-list API answers, and write the cookies back to the JSON file that
+weread_mp.py / wechat_incremental.py read.
 
-  python3 weread_keepalive.py --profile weread_profile --cookies weread_cookies.json          # daily cron
-  python3 weread_keepalive.py --profile weread_profile --cookies weread_cookies.json --login  # first time / after expiry
+  python3 weread_keepalive.py --cookies weread_cookies.json          # daily cron
+  python3 weread_keepalive.py --cookies weread_cookies.json --login  # first time / after expiry: scan the QR
 
-Exit codes: 0 session OK and cookies written; 2 not logged in (run again with --login and scan the QR).
+Exit codes: 0 session OK and cookies written; 2 not logged in (run again with --login).
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import sys
 import time
 
@@ -35,8 +37,8 @@ def logged_in(page) -> bool:
         return False
 
 
-def dump(page, path: str) -> dict:
-    cookies = page.context.cookies("https://weread.qq.com")
+def dump(ctx, path: str) -> dict:
+    cookies = ctx.cookies("https://weread.qq.com")
     json.dump([{k: c[k] for k in ("name", "value", "domain", "path")} for c in cookies],
               open(path, "w", encoding="utf-8"), indent=1)
     return {c["name"]: c["value"] for c in cookies}
@@ -44,7 +46,6 @@ def dump(page, path: str) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--profile", default="weread_profile", help="persistent Chrome profile directory")
     ap.add_argument("--cookies", default="weread_cookies.json")
     ap.add_argument("--login", action="store_true", help="show a QR code when the session is gone")
     ap.add_argument("--qr", default="weread_qr.png")
@@ -54,18 +55,22 @@ def main() -> int:
 
     with sync_playwright() as p:
         launch = {} if args.chromium else {"channel": "chrome"}
-        ctx = p.chromium.launch_persistent_context(args.profile, headless=True, locale="zh-CN", **launch)
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        browser = p.chromium.launch(headless=True, **launch)
+        ctx = browser.new_context(locale="zh-CN")
+        if os.path.exists(args.cookies) and not args.login:
+            ctx.add_cookies([{"name": c["name"], "value": c["value"], "domain": c.get("domain", ".weread.qq.com"),
+                              "path": c.get("path", "/")} for c in json.load(open(args.cookies, encoding="utf-8"))])
+        page = ctx.new_page()
         page.goto("https://weread.qq.com/", wait_until="networkidle", timeout=60000)
         page.wait_for_timeout(3000)  # the page renews wr_skey right after load
-        if logged_in(page):
-            names = dump(page, args.cookies)
-            print(f"OK vid {names.get('wr_vid')}, {len(names)} cookies -> {args.cookies}")
-            ctx.close()
-            return 0
         if not args.login:
+            if logged_in(page):
+                names = dump(ctx, args.cookies)
+                print(f"OK vid {names.get('wr_vid')}, {len(names)} cookies -> {args.cookies}")
+                browser.close()
+                return 0
             print("NOT LOGGED IN: run with --login and scan the QR code", file=sys.stderr)
-            ctx.close()
+            browser.close()
             return 2
 
         page.locator("text=登录").first.click()
@@ -84,12 +89,11 @@ def main() -> int:
             time.sleep(2)
         else:
             sys.exit("timed out waiting for the scan")
-        page.wait_for_timeout(3000)
-        if not logged_in(page):
-            sys.exit("scanned, but the article-list API still refuses; try again")
-        names = dump(page, args.cookies)
-        print(f"logged in as vid {names['wr_vid']}, {len(names)} cookies -> {args.cookies}")
-        ctx.close()
+        page.wait_for_timeout(3000)  # let the page finish its post-login requests
+        names = dump(ctx, args.cookies)
+        print(f"logged in as vid {names['wr_vid']}, {len(names)} cookies -> {args.cookies}"
+              + ("" if logged_in(page) else " (list API not ready yet; run again without --login to check)"))
+        browser.close()
     return 0
 
 

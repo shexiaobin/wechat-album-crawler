@@ -37,11 +37,11 @@ python3 weread_login.py         # 生成 weread_qr.png，用微信扫码，写�
 
 必须走真实浏览器：扫码登录只发 `wr_vid / wr_skey / wr_rt` 三个 cookie，纯 HTTP 调列表接口恒返回 `-2041`；浏览器打开页面后会补发 `wr_fp / wr_gid` 等，带上整套才能翻页。
 
-会话很短命：`wr_skey` 约一天，`wr_rt` 闲置一两天后 `/web/login/renewal` 也只回 `-2013`，之后列表接口返回 `-2012 登录超时`。一周只跑一次的 cron 到周一必定已失效。所以别用 `weread_login.py` 的一次性登录，改用带持久化 Chrome profile 的保活脚本，每天开一次页面让它自己续期：
+会话很短命：`wr_skey` 约一天，`wr_rt` 闲置一两天后 `/web/login/renewal` 也只回 `-2013`，之后列表接口返回 `-2012 登录超时`。一周只跑一次的 cron 到周一必定已失效。所以别用 `weread_login.py` 的一次性登录，改用保活脚本，每天把 cookie 载入无头 Chrome 开一次页面让它自己续期：
 
 ```bash
-python3 weread_keepalive.py --profile weread_profile --cookies weread_cookies.json --login   # 第一次：扫码
-python3 weread_keepalive.py --profile weread_profile --cookies weread_cookies.json           # 每天 cron；退出码 2 = 要重新扫码
+python3 weread_keepalive.py --cookies weread_cookies.json --login   # 第一次：扫码
+python3 weread_keepalive.py --cookies weread_cookies.json           # 每天 cron：载入 cookie 开一次页面让它续期再写回；退出码 2 = 要重新扫码
 ```
 
 ### 2. 单独拉一个号的微信读书列表
@@ -72,7 +72,7 @@ python3 wechat_incremental.py config.json
 - `wechat_album_crawler.py`：合集发现与抓取（存量）
 - `wechat_article_reader.py`：单篇文章正文解析（也可单独用：`python3 wechat_article_reader.py <url> --out a.md`）
 - `weread_login.py`：扫码登录微信读书，保存浏览器 cookie（需要 playwright；一次性，几天就过期）
-- `weread_keepalive.py`：持久化 Chrome profile 登录 + 每日保活，导出 cookie（需要 playwright）
+- `weread_keepalive.py`：扫码登录 + 每日保活，读写同一个 cookie 文件（需要 playwright）
 - `weread_mp.py`：微信读书公众号文章列表、cookie 续期
 - `wechat_incremental.py`：合集 + 微信读书增量
 - `config.example.json`：增量配置示例
