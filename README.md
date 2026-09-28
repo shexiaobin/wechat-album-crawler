@@ -37,6 +37,8 @@ python3 weread_login.py         # 生成 weread_qr.png，用微信扫码，写�
 
 必须走真实浏览器：扫码登录只发 `wr_vid / wr_skey / wr_rt` 三个 cookie，纯 HTTP 调列表接口恒返回 `-2041`；浏览器打开页面后会补发 `wr_fp / wr_gid` 等，带上整套才能翻页。
 
+**2026-09-28 起 `/web/mp/articles` 对网页版 cookie 一律返回 `-2041`**（同一会话 `/web/user`、`/web/mp/cover` 正常；网页版自己的 JS 里也不再调用这个接口，签名头 `x-wrpa-0` 回放也无效）。是账号级风控还是接口永久收紧尚未确认，`weread_keepalive.py` 每天会打印 `LIST API OK / errCode=…` 供观察。
+
 会话很短命：`wr_skey` 约一天，`wr_rt` 闲置一两天后 `/web/login/renewal` 也只回 `-2013`，之后列表接口返回 `-2012 登录超时`。一周只跑一次的 cron 到周一必定已失效。所以别用 `weread_login.py` 的一次性登录，改用保活脚本，每天把 cookie 载入无头 Chrome 开一次页面让它自己续期：
 
 ```bash

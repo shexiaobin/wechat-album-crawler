@@ -29,12 +29,23 @@ CHECK_BOOK = "MP_WXS_3559704352"  # any public account works; the API only answe
 
 
 def logged_in(page) -> bool:
-    r = page.request.get(f"https://weread.qq.com/web/mp/articles?bookId={CHECK_BOOK}&offset=0",
-                         headers={"Referer": "https://weread.qq.com/"})
+    """Session check via the user endpoint; also probes the article-list API, which the server
+    may refuse separately (-2041 since 2026-09-28) while the session itself is fine."""
+    vid = {c["name"]: c["value"] for c in page.context.cookies("https://weread.qq.com")}.get("wr_vid")
+    r = page.request.get(f"https://weread.qq.com/web/user?userVid={vid}", headers={"Referer": "https://weread.qq.com/"})
     try:
-        return not r.json().get("errCode")
+        ok = not r.json().get("errCode") and str(r.json().get("userVid")) == str(vid)
     except ValueError:
-        return False
+        ok = False
+    if ok:
+        r = page.request.get(f"https://weread.qq.com/web/mp/articles?bookId={CHECK_BOOK}&offset=0",
+                             headers={"Referer": "https://weread.qq.com/"})
+        try:
+            code = r.json().get("errCode")
+        except ValueError:
+            code = "non-json"
+        print("LIST API " + ("OK" if not code else f"errCode={code}"), flush=True)
+    return ok
 
 
 def dump(ctx, path: str) -> dict:
@@ -87,12 +98,22 @@ def main() -> int:
             if names.get("wr_vid") and names.get("wr_skey"):
                 break
             time.sleep(2)
+            # the QR code itself expires after a minute or two; the page then offers a refresh
+            stale = page.locator(".login_dialog_retry_delegate").first  # overlay shown once the code expires
+            if stale.count() and stale.is_visible():
+                stale.click(force=True)
+                page.wait_for_timeout(1500)
+            cur = img.get_attribute("src") or "" if img.count() else ""
+            if cur.startswith("data:image") and cur != src:
+                src = cur
+                open(args.qr, "wb").write(base64.b64decode(src.split(",", 1)[1]))
+                print(f"QR refreshed -> {args.qr}", flush=True)
         else:
             sys.exit("timed out waiting for the scan")
         page.wait_for_timeout(3000)  # let the page finish its post-login requests
         names = dump(ctx, args.cookies)
         print(f"logged in as vid {names['wr_vid']}, {len(names)} cookies -> {args.cookies}"
-              + ("" if logged_in(page) else " (list API not ready yet; run again without --login to check)"))
+              + ("" if logged_in(page) else " (session check failed; run again without --login)"))
         browser.close()
     return 0
 
