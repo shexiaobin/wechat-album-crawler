@@ -11,6 +11,10 @@ Only articles that sit in at least one album (or are linked from a visited artic
 can be reached. Standard library only.
 
   python3 wechat_album_crawler.py 'https://mp.weixin.qq.com/s/xxxx' -o output
+  python3 wechat_album_crawler.py --biz 'MzA5OTcyNzM1MQ==' --album 1505408485298126848 -o output
+
+When the seed page is blocked by WeChat's verification page (or you have no seed at all),
+pass --biz and --album so the crawl can start from the album endpoint directly.
 """
 
 from __future__ import annotations
@@ -68,22 +72,46 @@ def save_body(page: str, url: str, meta: dict, out_dir: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("url", help="any article URL of the target account")
+    ap.add_argument("url", nargs="?", help="any article URL of the target account (optional with --biz/--album)")
     ap.add_argument("-o", "--out", default="output", help="output directory (default: output)")
     ap.add_argument("--no-body", action="store_true", help="only collect the article list, skip bodies")
+    ap.add_argument("--biz", help="account id (__biz); lets the crawl continue when the seed page is blocked")
+    ap.add_argument("--album", action="append", default=[], help="album_id to start from (repeatable)")
     args = ap.parse_args()
+    if not args.url and not (args.biz and args.album):
+        ap.error("give an article URL, or --biz together with at least one --album")
 
-    seed = fetch_url(args.url)
-    m = re.search(r'biz\s*[:=]\s*"([A-Za-z0-9+/=]{8,})"', seed) or re.search(r"__biz=([A-Za-z0-9+/=]{8,})", seed)
-    if not m:
-        sys.exit("could not find the account id (__biz) in the article page")
-    biz = m.group(1)
+    seed, biz = "", args.biz
+    if args.url:
+        args.url = norm(args.url)[0]  # http:// seeds get the connection dropped by mp.weixin.qq.com
+        try:
+            seed = fetch_url(args.url)
+        except SystemExit as e:
+            print("seed fetch failed:", str(e)[:100], flush=True)
+        if detect_block_page(seed):
+            print("seed page is blocked:", detect_block_page(seed), "- continuing without it", flush=True)
+            seed = ""
+        m = re.search(r'biz\s*[:=]\s*"([A-Za-z0-9+/=]{8,})"', seed) or re.search(r"__biz=([A-Za-z0-9+/=%]{8,})", seed + args.url)
+        if m:
+            biz = urllib.parse.unquote(m.group(1))
+    if not biz:
+        sys.exit("could not find the account id (__biz); pass --biz")
     os.makedirs(os.path.join(args.out, "articles"), exist_ok=True)
     list_path = os.path.join(args.out, "articles.json")
 
     arts: dict = {}
-    queue = [args.url]
+    queue = [args.url] if args.url else []
     visited, albums, blocks = set(), {}, {}
+    for aid in args.album:
+        title, items = album_articles(biz, aid)
+        albums[aid] = {"title": title, "count": len(items)}
+        print(f"album {aid} {title}: {len(items)}", flush=True)
+        for x in items:
+            link, k = norm(x["url"])
+            a = arts.setdefault(k, {"title": x["title"], "link": link, "create_time": x.get("create_time"), "album": []})
+            if title not in a["album"]:
+                a["album"].append(title)
+            queue.append(link)
     while queue:
         url = queue.pop(0)
         key = norm(url)[1]
@@ -91,7 +119,7 @@ def main() -> int:
             continue
         visited.add(key)
         try:
-            page = seed if url == args.url else fetch_url(url)
+            page = seed if (url == args.url and seed) else fetch_url(url)
         except SystemExit as e:  # fetch_url exits on network/HTTP errors
             print("FAIL", url, str(e)[:100], flush=True)
             continue
@@ -124,6 +152,8 @@ def main() -> int:
                 queue.append(link)
         for raw in set(re.findall(r"https?://mp\.weixin\.qq\.com/s\?__biz=" + re.escape(biz) + r"[^\"'<>\s]+", page)):
             link, k = norm(raw)
+            if "sn=" not in link:  # scene=21 links without sn= are dead: they only return a block page
+                continue
             if k not in arts:
                 arts[k] = {"title": None, "link": link, "create_time": None, "album": []}
                 queue.append(link)

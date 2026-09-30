@@ -2,7 +2,7 @@
 
 拉取一个微信公众号的文章列表和正文（Markdown）。存量靠公开「合集」，不登录；增量另加微信读书这一路，能覆盖没进合集的文章和没有合集的公众号。
 
-2026-07-30 起微信关闭了公众号后台的「搜索其他公众号文章」接口，wechat-article-exporter 等依赖它的工具都已失效。目前还能用的两条路：
+2026-07-30 起微信关闭了公众号后台的「搜索其他公众号文章」接口，wechat-article-exporter 等依赖它的工具都已失效。目前还能用的两条路（2026-09-30 实测：合集稳定；微信读书的列表接口自 2026-09-28 起对网页 cookie 一律返回 -2041，暂时只能当作不可用）：
 
 | | 合集接口 | 微信读书 |
 |---|---|---|
@@ -11,20 +11,40 @@
 | 正文 | 直接从文章页取 | 只给列表，正文仍从文章页取 |
 | 用途 | 存量 | 增量，以及没有合集的号 |
 
+## 第 0 步：只知道名字，先找 `__biz`
+
+```bash
+pip install playwright                      # 用本机已装的 Google Chrome
+python3 find_account.py '公众号名字'          # 打印 biz / gh_ 号 / 合集 ID，并给出下一步命令
+```
+
+搜狗的「公众号搜索」现在对多数号返回空，但「文章搜索」在真实浏览器里仍然能用（纯 HTTP 请求会立刻被反爬页拦下）。脚本搜文章、点开结果、从文章页里取 `biz`、昵称和 `album_id`，最多看 4 篇把合集 ID 并起来。
+
+没有合集的号，同一个脚本加 `--collect` 可以把搜狗搜得到的文章正文都存下来（每个关键词最多 10 页，`--extra` 加关键词多搜几轮）：
+
+```bash
+python3 find_account.py '公众号名字' --collect -o output/some-account --pages 10 --extra 关键词1 关键词2
+```
+
+搜狗一小时内翻几十页就会触发反爬，脚本会等 30 分钟再继续；一个号通常只能拿到几十篇，这是目前无合集号唯一还能走的路。
+
 ## 存量：合集
 
 只用 Python 标准库（3.9+）。
 
 ```bash
 python3 wechat_album_crawler.py 'https://mp.weixin.qq.com/s/xxxx' -o output/some-account
+python3 wechat_album_crawler.py --biz 'MzA5OTcyNzM1MQ==' --album 1505408485298126848 -o output/some-account
 ```
 
-1. 打开你给的任意一篇文章，取出公众号 ID（`__biz`）和页面里出现的合集 ID（`album_id`）。
+1. 打开你给的任意一篇文章，取出公众号 ID（`__biz`）和页面里出现的合集 ID（`album_id`）；或者直接用 `--biz`/`--album` 起步，不依赖种子页。
 2. 用公开接口 `https://mp.weixin.qq.com/mp/appmsgalbum?action=getalbum&__biz=<biz>&album_id=<id>&count=20&f=json` 翻页拉完每个合集。
 3. 逐篇打开文章：保存正文；再从页面里找新的合集 ID 和同一公众号的文章链接，重复第 2 步，直到没有新东西。
 
 - `--no-body`：只要文章列表，不存正文。
 - 输出：`articles.json`（标题、链接、发布时间戳、所属合集）、`albums.json`、`articles/<日期>_<标题>.md`。
+- 种子链接会统一改成 https（http 会被 mp.weixin.qq.com 直接断开连接）；种子页被验证页拦住时不再整体退出，而是从 `--album` 或 URL 里的 `__biz` 继续。
+- 文章里 `scene=21` 且没有 `sn=` 的内链是死链（只会返回拦截页），不再入队。
 
 ## 增量：合集 + 微信读书
 
@@ -65,12 +85,13 @@ python3 wechat_incremental.py config.json
 
 ## 局限
 
-- 每篇正文间隔 2–4 秒；遇到微信验证页暂停 10 分钟再试，同一篇 3 次仍被拦就跳过。几百篇需要几十分钟。
+- 每篇正文间隔 2–4 秒；遇到微信验证页（「验证」「环境异常」）暂停 10 分钟再试，同一篇 3 次仍被拦就跳过。几百篇需要几十分钟。用真实 Chrome 打开同一篇也一样被拦，换浏览器没用，只能等。
 - 微信读书对部分号只保留近一两年的列表，且个别文章两边都没有；合集和微信读书互补，不能只留一条。
 - 只处理公开可访问的文章，不绕过登录、付费或验证；微信读书 cookie 只用于读你自己账号可见的公众号列表。
 
 ## 文件
 
+- `find_account.py`：按名字找 `__biz` 和合集 ID；无合集的号用 `--collect` 从搜狗逐篇取正文（需要 playwright）
 - `wechat_album_crawler.py`：合集发现与抓取（存量）
 - `wechat_article_reader.py`：单篇文章正文解析（也可单独用：`python3 wechat_article_reader.py <url> --out a.md`）
 - `weread_login.py`：扫码登录微信读书，保存浏览器 cookie（需要 playwright；一次性，几天就过期）
